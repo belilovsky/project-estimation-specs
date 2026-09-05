@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "slug": "constitution-my",
+  "name": "Constitution.my",
+  "state": "published-example",
+  "version": "1.2",
+  "as_of": "2026-09-05",
+  "source_ref": "https://github.com/belilovsky/constitution-my-estimation-spec/blob/a881dac72787d9160c7dcbeb5feb90a531ecd94e/methodology.md",
+  "editorial": "included",
+  "review": null,
+  "files": ["README.md"],
+  "external": {
+    "repository": "https://github.com/belilovsky/constitution-my-estimation-spec",
+    "commit": "a881dac72787d9160c7dcbeb5feb90a531ecd94e",
+    "entrypoint": "README.md",
+    "manifest": "manifest.json",
+    "manifest_sha256": "49c8f8b9683b38ec1cf961569d65e74ca1b6d247ac4d6905edf6b9ee9ab44fe8"
+  }
+}
