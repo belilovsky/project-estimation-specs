@@ -35,6 +35,47 @@ export const validSlug = value => typeof value === 'string' && value.length <= 6
 const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value)
   && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
+// A normalized synthetic quotation check, not a parser of free-form bids or a
+// price recommendation. Amounts are exact minor units on the same tax basis.
+export function checkReplacementQuote({ baseIds, removeIds, packages, replacement, fullAlternative }) {
+  const fail = code => { throw new Error(code); };
+  const amount = value => {
+    if (!Number.isSafeInteger(value) || value < 0) fail('unknown-or-invalid-price');
+    return value;
+  };
+  const sum = values => {
+    const total = values.reduce((a, b) => a + amount(b), 0);
+    if (!Number.isSafeInteger(total)) fail('price-overflow');
+    return total;
+  };
+  if (!Array.isArray(baseIds) || !baseIds.length || new Set(baseIds).size !== baseIds.length
+    || !Array.isArray(removeIds) || !removeIds.length || new Set(removeIds).size !== removeIds.length
+    || removeIds.some(id => !baseIds.includes(id))) fail('invalid-scope');
+  if (!Array.isArray(packages) || packages.some(p => !Array.isArray(p.covers) || !p.covers.length)
+    || !sameSet(packages.flatMap(p => p.covers), baseIds)) fail('base-coverage-or-double-count');
+  if (!replacement || !Array.isArray(replacement.covers) || !replacement.covers.length
+    || new Set(replacement.covers).size !== replacement.covers.length
+    || replacement.covers.some(id => baseIds.includes(id))) fail('replacement-overlap');
+  const base = sum(packages.map(p => p.amount));
+  const expected = [...baseIds.filter(id => !removeIds.includes(id)), ...replacement.covers];
+  // A full alternative is independently priced. It is not added to the base,
+  // and does not require an invented split or an invented replacement price.
+  if (fullAlternative !== undefined) {
+    if (!fullAlternative || !sameSet(fullAlternative.covers, expected)) fail('alternative-coverage-or-double-count');
+    return { base, alternative: amount(fullAlternative.amount), method: 'full' };
+  }
+  let removed = 0;
+  for (const p of packages) {
+    const ids = p.covers.filter(id => removeIds.includes(id));
+    if (!ids.length) continue;
+    if (ids.length === p.covers.length) { removed += p.amount; continue; }
+    if (!object(p.breakdown) || !sameSet(Object.keys(p.breakdown), p.covers)) fail('mixed-package-needs-breakdown');
+    if (sum(Object.values(p.breakdown)) !== p.amount) fail('breakdown-total');
+    removed += sum(ids.map(id => p.breakdown[id]));
+  }
+  return { base, alternative: amount(base - removed + amount(replacement.amount)), method: 'replacement' };
+}
+
 function publicUrl(value) {
   if (!filled(value)) return false;
   try {
@@ -169,7 +210,7 @@ async function fetchBytes(url, fetchImpl, limit) {
 }
 
 // Only this explicit mode performs network reads. The descriptor is for the
-// Constitution v1.2 flat 23-file package; future package shapes need a revision.
+  // Constitution v1.2/1.3 flat 23-file package; future package shapes need a revision.
 export async function verifyExternal(project, fetchImpl = fetch) {
   if (descriptorIssues(project, project.slug).length || !project.external) throw new Error('external-descriptor');
   const ext = project.external;

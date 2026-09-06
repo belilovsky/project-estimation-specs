@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createProject } from './new-project.mjs';
-import { PROJECT_FILES, ROOT_FILES, EXTERNAL_FILES, digestProject, validateRepository, verifyExternal } from './validate.mjs';
+import { PROJECT_FILES, ROOT_FILES, EXTERNAL_FILES, digestProject, validateRepository, verifyExternal, checkReplacementQuote } from './validate.mjs';
 
 const exec = promisify(execFile);
 const scripts = path.dirname(fileURLToPath(import.meta.url));
@@ -98,6 +98,34 @@ async function negative(label, code, change, { published = false } = {}) {
 }
 
 try {
+  // These are toy values, not project prices, market evidence or internal hours.
+  const quotation = () => ({ baseIds: ['build', 'copy', 'qa'], removeIds: ['copy'],
+    packages: [{ covers: ['build', 'copy'], amount: 90, breakdown: { build: 70, copy: 20 } }, { covers: ['qa'], amount: 10 }],
+    replacement: { covers: ['import'], amount: 5 } });
+  await positive('mixed package retains build and QA exactly once', async () => {
+    assert.deepEqual(checkReplacementQuote(quotation()), { base: 100, alternative: 85, method: 'replacement' });
+  });
+  await positive('full alternative accepts unsplit package and unknown component price', async () => {
+    const q = quotation(); delete q.packages[0].breakdown; q.replacement.amount = null;
+    q.fullAlternative = { covers: ['build', 'qa', 'import'], amount: 83 };
+    assert.deepEqual(checkReplacementQuote(q), { base: 100, alternative: 83, method: 'full' });
+  });
+  await positive('explicit zero is distinct from an unknown price', async () => {
+    const q = quotation(); q.replacement.amount = 0;
+    assert.equal(checkReplacementQuote(q).alternative, 80);
+  });
+  for (const [label, code, mutate] of [
+    ['missing mixed breakdown', 'mixed-package-needs-breakdown', q => { delete q.packages[0].breakdown; }],
+    ['unknown replacement price', 'unknown-or-invalid-price', q => { q.replacement.amount = null; }],
+    ['unknown retained component price', 'unknown-or-invalid-price', q => { q.packages[0].breakdown.build = null; }],
+    ['alternative added into base', 'base-coverage-or-double-count', q => { q.packages.push({ covers: ['import'], amount: 5 }); }],
+    ['replacement included twice', 'alternative-coverage-or-double-count', q => { q.fullAlternative = { covers: ['build', 'qa', 'import', 'import'], amount: 90 }; }],
+    ['retained work dropped with mixed package', 'alternative-coverage-or-double-count', q => { q.fullAlternative = { covers: ['qa', 'import'], amount: 20 }; }],
+    ['inconsistent breakdown', 'breakdown-total', q => { q.packages[0].breakdown.copy = 0; }],
+  ]) {
+    const q = quotation(); mutate(q); assert.throws(() => checkReplacementQuote(q), new RegExp(code));
+    totals.negative++; console.log(`PASS negative: ${label}`);
+  }
   await positive('draft creation and offline validation', async () => {
     const root = await fixture();
     const result = await validateRepository(root, { fetchImpl: async () => { throw new Error('Offline mode attempted network'); } });
